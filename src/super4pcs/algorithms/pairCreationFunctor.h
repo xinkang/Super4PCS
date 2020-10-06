@@ -1,15 +1,17 @@
-#ifndef PAIRCREATIONFUNCTOR_H
-#define PAIRCREATIONFUNCTOR_H
+#ifndef _SUPER4PCS_ALGO_PAIRCREATIONFUNCTOR_H
+#define _SUPER4PCS_ALGO_PAIRCREATIONFUNCTOR_H
 
 #include <iostream>
 #include <vector>
 #include "super4pcs/shared4pcs.h"
 
+#include "super4pcs/accelerators/bbox.h"
+
 #include "super4pcs/accelerators/pairExtraction/bruteForceFunctor.h"
 #include "super4pcs/accelerators/pairExtraction/intersectionFunctor.h"
 #include "super4pcs/accelerators/pairExtraction/intersectionPrimitive.h"
 
-namespace Super4PCS {
+namespace GlobalRegistration {
 
 template <typename _Scalar>
 struct PairCreationFunctor{
@@ -89,7 +91,7 @@ public:
     points.clear();
     primitives.clear();
 
-    Super4PCS::AABB3D<Scalar> bbox;
+    GlobalRegistration::AABB3D<Scalar> bbox;
 
     unsigned int nSamples = Q_.size();
 
@@ -101,14 +103,12 @@ public:
     for (unsigned int i = 0; i < nSamples; ++i) {
         const VectorType &q = Q_[i].pos();
       points.push_back(q);
-      bbox.extendTo(q);
+      bbox.extend(q);
     }
 
     _gcenter = bbox.center();
     // add a delta to avoid to have elements with coordinate = 1
-    _ratio = std::max(bbox.depth() + 0.001,
-             std::max(bbox.width() + 0.001,
-                      bbox.height()+ 0.001));
+    _ratio = bbox.diagonal().maxCoeff() + 0.001;
 
     // update point cloud (worldToUnit use the ratio and gravity center
     // previously computed)

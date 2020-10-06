@@ -11,7 +11,7 @@
 #define LINE_BUF_SIZE 100
 
 using namespace std;
-using namespace Super4PCS;
+using namespace GlobalRegistration;
 
 ////////////////////////////////////////////////////////////////////////////////
 /// Read
@@ -24,6 +24,9 @@ IOManager::ReadObject(const char *name,
            vector<tripple> &tris,
            vector<std::string> &mtls){
   string filename (name);
+
+  if (filename.length() < 4) return false;
+
   string ext = filename.substr(filename.size()-3);
 
   if ( ext.compare ("ply") == 0 )

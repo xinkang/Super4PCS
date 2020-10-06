@@ -47,8 +47,10 @@
 #include "super4pcs/accelerators/kdtree.h"
 
 #include <vector>
+#include <atomic>
 
 #include <Eigen/Core>
+#include <Eigen/Geometry>
 
 const double pi = std::acos(-1);
 
@@ -129,155 +131,54 @@ distSegmentToSegment(const VectorType& p1, const VectorType& p2,
 }
 
 
-namespace Super4PCS{
+namespace GlobalRegistration{
 
-Match4PCSBase::Match4PCSBase(const Match4PCSOptions& options,
-                             const Utils::Logger& logger)
-  :number_of_trials_(0),
-    max_base_diameter_(-1),
-    P_mean_distance_(1.0),
-    best_LCP_(0.0),
-    options_(options),
-    randomGenerator_(options.randomSeed),
-    logger_(logger)
+Match4PCSBase::Match4PCSBase(  const Match4PCSOptions& options
+                             , const Utils::Logger& logger
+#ifdef SUPER4PCS_USE_OPENMP
+                             , const int omp_nthread_congruent
+#endif
+                               )
+  :number_of_trials_(0)
+  , max_base_diameter_(-1)
+  , P_mean_distance_(1.0)
+  , best_LCP_(0.0)
+  , options_(options)
+  , randomGenerator_(options.randomSeed)
+  , logger_(logger)
+#ifdef SUPER4PCS_USE_OPENMP
+  , omp_nthread_congruent_(omp_nthread_congruent)
+#endif
 {
   base_3D_.resize(4);
 }
 
+Match4PCSBase::~Match4PCSBase(){}
+
 Match4PCSBase::Scalar
 Match4PCSBase::MeanDistance() {
   const Scalar kDiameterFraction = 0.2;
-  Super4PCS::KdTree<Scalar>::VectorType query_point;
+  using RangeQuery = GlobalRegistration::KdTree<Scalar>::RangeQuery<>;
 
   int number_of_samples = 0;
   Scalar distance = 0.0;
 
   for (size_t i = 0; i < sampled_P_3D_.size(); ++i) {
-    query_point = sampled_P_3D_[i].pos().cast<Scalar>() ;
 
-    Super4PCS::KdTree<Scalar>::Index resId =
-        kd_tree_.doQueryRestrictedClosestIndex(query_point, P_diameter_ * kDiameterFraction, i);
+    RangeQuery query;
+    query.sqdist = P_diameter_ * kDiameterFraction;
+    query.queryPoint = sampled_P_3D_[i].pos().cast<Scalar>();
 
-    if (resId != Super4PCS::KdTree<Scalar>::invalidIndex()) {
+    GlobalRegistration::KdTree<Scalar>::Index resId =
+        kd_tree_.doQueryRestrictedClosestIndex(query , i);
+
+    if (resId != GlobalRegistration::KdTree<Scalar>::invalidIndex()) {
       distance += (sampled_P_3D_[i].pos() - sampled_P_3D_[resId].pos()).norm();
       number_of_samples++;
     }
   }
 
   return distance / number_of_samples;
-}
-
-void Match4PCSBase::init(const std::vector<Point3D>& P,
-                         const std::vector<Point3D>& Q){
-
-#ifdef TEST_GLOBAL_TIMINGS
-    kdTreeTime = 0;
-    totalTime  = 0;
-    verifyTime = 0;
-#endif
-
-    const Scalar kSmallError = 0.00001;
-    const int kMinNumberOfTrials = 4;
-    const Scalar kDiameterFraction = 0.3;
-
-    centroid_P_ = VectorType::Zero();
-    centroid_Q_ = VectorType::Zero();
-
-    sampled_P_3D_.clear();
-    sampled_Q_3D_.clear();
-
-    // prepare P
-    if (P.size() > options_.sample_size){
-        Super4PCS::Sampling::DistUniformSampling(P, options_.delta, &sampled_P_3D_);
-    }
-    else
-    {
-        Log<LogLevel::ErrorReport>( "(P) More samples requested than available: use whole cloud" );
-        sampled_P_3D_ = P;
-    }
-
-
-
-    // prepare Q
-    if (Q.size() > options_.sample_size){
-        std::vector<Point3D> uniform_Q;
-        Super4PCS::Sampling::DistUniformSampling(Q, options_.delta, &uniform_Q);
-
-
-        std::shuffle(uniform_Q.begin(), uniform_Q.end(), randomGenerator_);
-        size_t nbSamples = std::min(uniform_Q.size(), options_.sample_size);
-        auto endit = uniform_Q.begin(); std::advance(endit, nbSamples );
-        std::copy(uniform_Q.begin(), endit, std::back_inserter(sampled_Q_3D_));
-    }
-    else
-    {
-        Log<LogLevel::ErrorReport>( "(Q) More samples requested than available: use whole cloud" );
-        sampled_Q_3D_ = Q;
-    }
-
-
-    // center points around centroids
-    auto centerPoints = [](std::vector<Point3D>&container,
-            VectorType& centroid){
-        for(const auto& p : container) centroid += p.pos();
-        centroid /= Scalar(container.size());
-        for(auto& p : container) p.pos() -= centroid;
-    };
-    centerPoints(sampled_P_3D_, centroid_P_);
-    centerPoints(sampled_Q_3D_, centroid_Q_);
-
-    initKdTree();
-    // Compute the diameter of P approximately (randomly). This is far from being
-    // Guaranteed close to the diameter but gives good results for most common
-    // objects if they are densely sampled.
-    P_diameter_ = 0.0;
-    for (int i = 0; i < kNumberOfDiameterTrials; ++i) {
-        int at = randomGenerator_() % sampled_Q_3D_.size();
-        int bt = randomGenerator_() % sampled_Q_3D_.size();
-
-        Scalar l = (sampled_Q_3D_[bt].pos() - sampled_Q_3D_[at].pos()).norm();
-        if (l > P_diameter_) {
-            P_diameter_ = l;
-        }
-    }
-
-    // Mean distance and a bit more... We increase the estimation to allow for
-    // noise, wrong estimation and non-uniform sampling.
-    P_mean_distance_ = MeanDistance();
-
-    // Normalize the delta (See the paper) and the maximum base distance.
-    // delta = P_mean_distance_ * delta;
-    max_base_diameter_ = P_diameter_;  // * estimated_overlap_;
-
-    // RANSAC probability and number of needed trials.
-    Scalar first_estimation =
-            std::log(kSmallError) / std::log(1.0 - pow(options_.getOverlapEstimation(),
-                                             static_cast<Scalar>(kMinNumberOfTrials)));
-    // We use a simple heuristic to elevate the probability to a reasonable value
-    // given that we don't simply sample from P, but instead, we bound the
-    // distance between the points in the base as a fraction of the diameter.
-    number_of_trials_ =
-            static_cast<int>(first_estimation * (P_diameter_ / kDiameterFraction) /
-                             max_base_diameter_);
-    if (number_of_trials_ < kMinNumberOfTrials)
-        number_of_trials_ = kMinNumberOfTrials;
-
-    Log<LogLevel::Verbose>( "norm_max_dist: ", options_.delta );
-    current_trial_ = 0;
-    best_LCP_ = 0.0;
-
-    Q_copy_ = Q;
-    for (int i = 0; i < 4; ++i) {
-        base_[i] = 0;
-        current_congruent_[i] = 0;
-    }
-    transform_ = Eigen::Matrix<Scalar, 4, 4>::Identity();
-
-    // call Virtual handler
-    Initialize(P, Q);
-
-    best_LCP_ = Verify(transform_);
-    Log<LogLevel::Verbose>( "Initial LCP: ", best_LCP_ );
 }
 
 
@@ -453,7 +354,7 @@ void Match4PCSBase::initKdTree(){
   size_t number_of_points = sampled_P_3D_.size();
 
   // Build the kdtree.
-  kd_tree_ = Super4PCS::KdTree<Scalar>(number_of_points);
+  kd_tree_ = GlobalRegistration::KdTree<Scalar>(number_of_points);
 
   for (size_t i = 0; i < number_of_points; ++i) {
     kd_tree_.add(sampled_P_3D_[i].pos());
@@ -461,144 +362,36 @@ void Match4PCSBase::initKdTree(){
   kd_tree_.finalize();
 }
 
-bool Match4PCSBase::TryCongruentSet(
-        int base_id1,
-        int base_id2,
-        int base_id3,
-        int base_id4,
-        const std::vector<Quadrilateral>& congruent_quads,
-        size_t &nbCongruent){
-    std::array<std::pair<Point3D, Point3D>,4> congruent_points;
-
-    // get references to the basis coordinates
-    const Point3D& b1 = sampled_P_3D_[base_id1];
-    const Point3D& b2 = sampled_P_3D_[base_id2];
-    const Point3D& b3 = sampled_P_3D_[base_id3];
-    const Point3D& b4 = sampled_P_3D_[base_id4];
-
-
-    // Centroid of the basis, computed once and using only the three first points
-    Eigen::Matrix<Scalar, 3, 1> centroid1 = (b1.pos() + b2.pos() + b3.pos()) / Scalar(3);
-
-    // Centroid of the sets, computed in the loop using only the three first points
-    Eigen::Matrix<Scalar, 3, 1> centroid2;
-
-    // set the basis coordinates in the congruent quad array
-    congruent_points[0].first = b1;
-    congruent_points[1].first = b2;
-    congruent_points[2].first = b3;
-    congruent_points[3].first = b4;
-
-    nbCongruent = 0;
-
-    Eigen::Matrix<Scalar, 4, 4> transform;
-    for (size_t i = 0; i < congruent_quads.size(); ++i) {
-      const int a = congruent_quads[i].vertices[0];
-      const int b = congruent_quads[i].vertices[1];
-      const int c = congruent_quads[i].vertices[2];
-      const int d = congruent_quads[i].vertices[3];
-      congruent_points[0].second = sampled_Q_3D_[a];
-      congruent_points[1].second = sampled_Q_3D_[b];
-      congruent_points[2].second = sampled_Q_3D_[c];
-      congruent_points[3].second = sampled_Q_3D_[d];
-
-  #ifdef STATIC_BASE
-      Log<LogLevel::Verbose>( "Ids: ", base_id1, "\t", base_id2, "\t", base_id3, "\t", base_id4);
-      Log<LogLevel::Verbose>( "     ", a, "\t", b, "\t", c, "\t", d);
-  #endif
-
-      centroid2 = (congruent_points[0].second.pos() +
-                   congruent_points[1].second.pos() +
-                   congruent_points[2].second.pos()) / Scalar(3.);
-
-      Scalar rms = -1;
-
-      const bool ok =
-      ComputeRigidTransformation(congruent_points,   // input congruent quads
-                                 centroid1,          // input: basis centroid
-                                 centroid2,          // input: candidate quad centroid
-                                 options_.max_angle * pi / 180.0, // maximum per-dimension angle, check return value to detect invalid cases
-                                 transform,          // output: transformation
-                                 rms,                // output: rms error of the transformation between the basis and the congruent quad
-                             #ifdef MULTISCALE
-                                 true
-                             #else
-                                 false
-                             #endif
-                                 );             // state: compute scale ratio ?
-
-      if (ok && rms >= Scalar(0.)) {
-
-        // We give more tolerantz in computing the best rigid transformation.
-        if (rms < distance_factor * options_.delta) {
-
-          nbCongruent++;
-          // The transformation is computed from the point-clouds centered inn [0,0,0]
-
-          // Verify the rest of the points in Q against P.
-          Scalar lcp = Verify(transform);
-          if (lcp > best_LCP_) {
-            // Retain the best LCP and transformation.
-            base_[0] = base_id1;
-            base_[1] = base_id2;
-            base_[2] = base_id3;
-            base_[3] = base_id4;
-
-            current_congruent_[0] = a;
-            current_congruent_[1] = b;
-            current_congruent_[2] = c;
-            current_congruent_[3] = d;
-
-            best_LCP_    = lcp;
-            transform_   = transform;
-            qcentroid1_  = centroid1;
-            qcentroid2_  = centroid2;
-          }
-          // Terminate if we have the desired LCP already.
-          if (best_LCP_ > options_.getTerminateThreshold()){
-            return true;
-          }
-        }
-      }
-    }
-
-    // If we reached here we do not have yet the desired LCP.
-    return false;
-}
-
-
-bool Match4PCSBase::ComputeRigidTransformation(const std::array< std::pair<Point3D, Point3D>,4>& pairs,
+bool Match4PCSBase::ComputeRigidTransformation(
+        const std::array<Point3D, 4>& ref,
+        const std::array<Point3D, 4>& candidate,
         const Eigen::Matrix<Scalar, 3, 1>& centroid1,
         Eigen::Matrix<Scalar, 3, 1> centroid2,
         Scalar max_angle,
         Eigen::Ref<MatrixType> transform,
         Scalar& rms_,
-        bool computeScale ) {
+        bool computeScale ) const {
 
   rms_ = kLargeNumber;
-
-  if (pairs.size() == 0 || pairs.size() % 2 != 0)
-      return false;
-
 
   Scalar kSmallNumber = 1e-6;
 
   // We only use the first 3 pairs. This simplifies the process considerably
   // because it is the planar case.
 
-  const VectorType& p0 = pairs[0].first.pos();
-  const VectorType& p1 = pairs[1].first.pos();
-  const VectorType& p2 = pairs[2].first.pos();
-        VectorType  q0 = pairs[0].second.pos();
-        VectorType  q1 = pairs[1].second.pos();
-        VectorType  q2 = pairs[2].second.pos();
+  const VectorType& p0 = ref[0].pos();
+  const VectorType& p1 = ref[1].pos();
+  const VectorType& p2 = ref[2].pos();
+        VectorType  q0 = candidate[0].pos();
+        VectorType  q1 = candidate[1].pos();
+        VectorType  q2 = candidate[2].pos();
 
   Scalar scaleEst (1.);
 
   // Compute scale factor if needed
   if (computeScale){
-      const VectorType& p3 = pairs[3].first.pos();
-      const VectorType& q3 = pairs[3].second.pos();
+      const VectorType& p3 = ref[3].pos();
+      const VectorType& q3 = candidate[3].pos();
 
       const Scalar ratio1 = (p1 - p0).norm() / (q1 - q0).norm();
       const Scalar ratio2 = (p3 - p2).norm() / (q3 - q2).norm();
@@ -627,6 +420,8 @@ bool Match4PCSBase::ComputeRigidTransformation(const std::array< std::pair<Point
   if (vector_p2.squaredNorm() == 0) return kLargeNumber;
   vector_p2.normalize();
   VectorType vector_p3 = vector_p1.cross(vector_p2);
+  if (vector_p3.squaredNorm() == 0) return kLargeNumber;
+  vector_p3.normalize();
 
   VectorType vector_q1 = q1 - q0;
   if (vector_q1.squaredNorm() == 0) return kLargeNumber;
@@ -635,6 +430,8 @@ bool Match4PCSBase::ComputeRigidTransformation(const std::array< std::pair<Point
   if (vector_q2.squaredNorm() == 0) return kLargeNumber;
   vector_q2.normalize();
   VectorType vector_q3 = vector_q1.cross(vector_q2);
+  if (vector_q3.squaredNorm() == 0) return kLargeNumber;
+  vector_q3.normalize();
 
   //cv::Mat rotation = cv::Mat::eye(3, 3, CV_64F);
   Eigen::Matrix<Scalar, 3, 3> rotation = Eigen::Matrix<Scalar, 3, 3>::Identity();
@@ -683,26 +480,21 @@ bool Match4PCSBase::ComputeRigidTransformation(const std::array< std::pair<Point
 
       //cv::Mat first(3, 1, CV_64F), transformed;
       for (int i = 0; i < 3; ++i) {
-          first = scaleEst*pairs[i].second.pos() - centroid2;
+          first = scaleEst*candidate[i].pos() - centroid2;
           transformed = rotation * first;
-          rms_ += (transformed - pairs[i].first.pos() + centroid1).norm();
+          rms_ += (transformed - ref[i].pos() + centroid1).norm();
       }
   }
 
-  rms_ /= Scalar(pairs.size());
+  rms_ /= Scalar(ref.size());
 
   Eigen::Transform<Scalar, 3, Eigen::Affine> etrans (Eigen::Transform<Scalar, 3, Eigen::Affine>::Identity());
-
-  // compute rotation and translation
-  {
-      // Log<LogLevel::Verbose>( scaleEst);
-      etrans.scale(scaleEst);       // apply scale factor
-      etrans.translate(centroid1);  // translation between quads
-      etrans.rotate(rotation);           // rotate to align frames
-      etrans.translate(-centroid2); // move to congruent quad frame
-
-      transform = etrans.matrix();
-  }
+  transform = etrans
+      .scale(scaleEst)
+      .translate(centroid1)
+      .rotate(rotation)
+      .translate(-centroid2)
+      .matrix();
 
   return true;
 }
@@ -714,7 +506,8 @@ bool Match4PCSBase::ComputeRigidTransformation(const std::array< std::pair<Point
 // we describe randomized verification. We apply deterministic one here with
 // early termination. It was found to be fast in practice.
 Match4PCSBase::Scalar
-Match4PCSBase::Verify(const Eigen::Ref<const MatrixType> &mat) {
+Match4PCSBase::Verify(const Eigen::Ref<const MatrixType> &mat) const {
+  using RangeQuery = GlobalRegistration::KdTree<Scalar>::RangeQuery<>;
 
 #ifdef TEST_GLOBAL_TIMINGS
     Timer t_verify (true);
@@ -722,7 +515,7 @@ Match4PCSBase::Verify(const Eigen::Ref<const MatrixType> &mat) {
 
   // We allow factor 2 scaling in the normalization.
   const Scalar epsilon = options_.delta;
-  size_t good_points = 0;
+  std::atomic_uint good_points(0);
   const size_t number_of_points = sampled_Q_3D_.size();
   const size_t terminate_value = best_LCP_ * number_of_points;
 
@@ -735,17 +528,18 @@ Match4PCSBase::Verify(const Eigen::Ref<const MatrixType> &mat) {
     Timer t (true);
 #endif
 
-    Super4PCS::KdTree<Scalar>::Index resId =
-    kd_tree_.doQueryRestrictedClosestIndex(
-                (mat * sampled_Q_3D_[i].pos().homogeneous()).head<3>(),
-                sq_eps);
+    RangeQuery query;
+    query.queryPoint = (mat * sampled_Q_3D_[i].pos().homogeneous()).head<3>();
+    query.sqdist     = sq_eps;
 
+    GlobalRegistration::KdTree<Scalar>::Index resId =
+    kd_tree_.doQueryRestrictedClosestIndex( query );
 
 #ifdef TEST_GLOBAL_TIMINGS
     kdTreeTime += Scalar(t.elapsed().count()) / Scalar(CLOCKS_PER_SEC);
 #endif
 
-    if ( resId != Super4PCS::KdTree<Scalar>::invalidIndex() ) {
+    if ( resId != GlobalRegistration::KdTree<Scalar>::invalidIndex() ) {
 //      Point3D& q = sampled_P_3D_[near_neighbor_index[0]];
 //      bool rgb_good =
 //          (p.rgb()[0] >= 0 && q.rgb()[0] >= 0)
@@ -770,88 +564,6 @@ Match4PCSBase::Verify(const Eigen::Ref<const MatrixType> &mat) {
   verifyTime += Scalar(t_verify.elapsed().count()) / Scalar(CLOCKS_PER_SEC);
 #endif
   return Scalar(good_points) / Scalar(number_of_points);
-}
-
-// Pick one base, finds congruent 4-points in Q, verifies for all
-// transformations, and retains the best transformation and LCP. This is
-// a complete RANSAC iteration.
-bool Match4PCSBase::TryOneBase() {
-  Scalar invariant1, invariant2;
-  int base_id1, base_id2, base_id3, base_id4;
-
-//#define STATIC_BASE
-
-#ifdef STATIC_BASE
-  static bool first_time = true;
-
-  if (first_time){
-      base_id1 = 0;
-      base_id2 = 3;
-      base_id3 = 1;
-      base_id4 = 4;
-
-      base_3D_[0] = sampled_P_3D_ [base_id1];
-      base_3D_[1] = sampled_P_3D_ [base_id2];
-      base_3D_[2] = sampled_P_3D_ [base_id3];
-      base_3D_[3] = sampled_P_3D_ [base_id4];
-
-      TryQuadrilateral(&invariant1, &invariant2, base_id1, base_id2, base_id3, base_id4);
-
-      first_time = false;
-  }
-  else
-      return false;
-
-#else
-
-  if (!SelectQuadrilateral(invariant1, invariant2, base_id1, base_id2,
-                           base_id3, base_id4)) {
-    return false;
-  }
-#endif
-
-  // Computes distance between pairs.
-  const Scalar distance1 = (base_3D_[0].pos()- base_3D_[1].pos()).norm();
-  const Scalar distance2 = (base_3D_[2].pos()- base_3D_[3].pos()).norm();
-
-  std::vector<std::pair<int, int>> pairs1, pairs2;
-  std::vector<Quadrilateral> congruent_quads;
-
-  // Compute normal angles.
-  const Scalar normal_angle1 = (base_3D_[0].normal() - base_3D_[1].normal()).norm();
-  const Scalar normal_angle2 = (base_3D_[2].normal() - base_3D_[3].normal()).norm();
-
-  ExtractPairs(distance1, normal_angle1, distance_factor * options_.delta, 0,
-                  1, &pairs1);
-  ExtractPairs(distance2, normal_angle2, distance_factor * options_.delta, 2,
-                  3, &pairs2);
-
-//  Log<LogLevel::Verbose>( "Pair creation ouput: ", pairs1.size(), " - ", pairs2.size());
-
-  if (pairs1.size() == 0 || pairs2.size() == 0) {
-    return false;
-  }
-
-
-  if (!FindCongruentQuadrilaterals(invariant1, invariant2,
-                                   distance_factor * options_.delta,
-                                   distance_factor * options_.delta,
-                                   pairs1,
-                                   pairs2,
-                                   &congruent_quads)) {
-    return false;
-  }
-
-  size_t nb = 0;
-
-  bool match = TryCongruentSet(base_id1, base_id2, base_id3, base_id4,
-                               congruent_quads,
-                               nb);
-
-  //if (nb != 0)
-  //  Log<LogLevel::Verbose>( "Congruent quads: (", nb, ")    " );
-
-  return match;
 }
 
 } // namespace Super4PCS

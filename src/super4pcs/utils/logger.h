@@ -44,11 +44,12 @@
 // source code and datasets are available for research use at
 // http://geometry.cs.ucl.ac.uk/projects/2014/super4PCS/.
 
-#ifndef LOGGER_H
-#define LOGGER_H
+#ifndef _SUPER4PCS_UTILS_LOGGER_H
+#define _SUPER4PCS_UTILS_LOGGER_H
 
+#include <iostream>
 
-namespace Super4PCS{
+namespace GlobalRegistration{
 namespace Utils{
 
 enum LogLevel {

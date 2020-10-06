@@ -45,18 +45,14 @@
 // http://geometry.cs.ucl.ac.uk/projects/2014/super4PCS/.
 
 
-#ifndef _INDEXED_NORMAL_SET_HPP_
-#define _INDEXED_NORMAL_SET_HPP_
+#ifndef _SUPER4PCS_ACCELERATORS_INDEXED_NORMAL_SET_HPP_
+#define _SUPER4PCS_ACCELERATORS_INDEXED_NORMAL_SET_HPP_
 
 #include <math.h>
 #include <set>
 #include <Eigen/Geometry>
 
-namespace Super4PCS{
-
-template <class Point, int dim, int _ngSize, typename Scalar>
-constexpr Scalar
-IndexedNormalSet<Point, dim, _ngSize, Scalar>::_nepsilon;
+namespace GlobalRegistration{
 
 template <class Point, int dim, int _ngSize, typename Scalar>
 IndexedNormalSet<Point, dim, _ngSize, Scalar>::~IndexedNormalSet(){

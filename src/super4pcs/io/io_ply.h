@@ -1,5 +1,7 @@
-#ifndef IO_PLY_H
-#define IO_PLY_H
+#ifndef _SUPER4PCS_IO_PLY_H
+#define _SUPER4PCS_IO_PLY_H
+
+#include <cstdarg>
 
 typedef enum {
     BINARY_BIG_ENDIAN_1,
@@ -138,6 +140,19 @@ bigLittleEndianSwap (T * v, unsigned int numOfElements)
     }
 }
 
+inline bool
+almostsafefread ( void * ptr, size_t size, size_t count, FILE * stream ){
+    size_t result = fread (ptr,size,count,stream);
+    return (result == count);
+}
+
+template<int targetCount, typename... Args>
+inline bool
+almostsafefscanf ( FILE * stream, const char * format, Args&&... args ){
+    int count = fscanf (stream,format, std::forward<Args>(args)...);
+    return (count == targetCount);
+}
+
 
 bool
 readBinary1Body (const std::string & filename,
@@ -147,13 +162,12 @@ readBinary1Body (const std::string & filename,
                  unsigned int numOfVertexProperties,
                  bool         haveColor,
                  bool bigEndian,
-                 std::vector<Super4PCS::Point3D>& vertex,
-                 std::vector<typename Super4PCS::Point3D::VectorType>& normal,
+                 std::vector<GlobalRegistration::Point3D>& vertex,
+                 std::vector<typename GlobalRegistration::Point3D::VectorType>& normal,
                  std::vector<tripple>& face )
 {
-    //size_t count;
     using namespace std;
-    using namespace Super4PCS;
+    using namespace GlobalRegistration;
 
     FILE * in = fopen (filename.c_str (), "r");
     if (!in){
@@ -161,9 +175,9 @@ readBinary1Body (const std::string & filename,
         return false;
     }
 
+    char c;
     for (unsigned int i = 0; i < headerSize; i++) {
-        char c;
-        /*count = */fread (&c, 1, 1, in);
+        almostsafefread (&c, 1, 1, in);
     }
 
     // *****************
@@ -176,20 +190,20 @@ readBinary1Body (const std::string & filename,
 
     for (unsigned int i = 0; i < numOfVertices && !feof (in); i++) {
         if (numOfVertexProperties==10){
-            fread (v, 4, 6, in);
-            fread (rgb_buff, sizeof(unsigned char), 4, in);
+            almostsafefread (v, 4, 6, in);
+            almostsafefread (rgb_buff, sizeof(unsigned char), 4, in);
         }else if (numOfVertexProperties==9){
-            fread (v, 4, 6, in);
-            fread (rgb_buff, sizeof(unsigned char), 3, in);
+            almostsafefread (v, 4, 6, in);
+            almostsafefread (rgb_buff, sizeof(unsigned char), 3, in);
         }else if (numOfVertexProperties==6 && haveColor){
-            fread (v, 4, 3, in);
-            fread (rgb_buff, sizeof(unsigned char), 3, in);
+            almostsafefread (v, 4, 3, in);
+            almostsafefread (rgb_buff, sizeof(unsigned char), 3, in);
         }else if (numOfVertexProperties==7 ){
-            fread (v, 4, 3, in);
-            fread (rgb_buff, sizeof(unsigned char), 4, in);
+            almostsafefread (v, 4, 3, in);
+            almostsafefread (rgb_buff, sizeof(unsigned char), 4, in);
         }
         else
-            fread (v, 4, numOfVertexProperties, in);
+            almostsafefread (v, 4, numOfVertexProperties, in);
         if (bigEndian == true)
             bigLittleEndianSwap (v, numOfVertexProperties);
         vertex.emplace_back( v[0],v[1],v[2] );
@@ -228,8 +242,8 @@ readBinary1Body (const std::string & filename,
         for (unsigned int i = 0; i < numOfFaces && !feof (in); i++) {
             unsigned int f[4];
             char polygonSize;
-            /*count = */fread (&polygonSize, 1, 1, in);
-            /*count = */fread (f, 4, 3, in);
+            almostsafefread (&polygonSize, 1, 1, in);
+            almostsafefread (f, 4, 3, in);
             if (bigEndian == true)
                 bigLittleEndianSwap (f, 3);
             face.emplace_back(f[0],f[1],f[2]);
@@ -247,12 +261,12 @@ readASCII1Body (const std::string & filename,
                 unsigned int numOfFaces,
                 unsigned int numOfVertexProperties,
                 bool         haveColor,
-                std::vector<Super4PCS::Point3D>& vertex,
-                std::vector<typename Super4PCS::Point3D::VectorType>& normal,
+                std::vector<GlobalRegistration::Point3D>& vertex,
+                std::vector<typename GlobalRegistration::Point3D::VectorType>& normal,
                 std::vector<tripple>& face )
 {
     using namespace std;
-    using namespace Super4PCS;
+    using namespace GlobalRegistration;
 
     FILE * in = fopen (filename.c_str (), "r");
     if (!in){
@@ -260,9 +274,9 @@ readASCII1Body (const std::string & filename,
         return false;
     }
 
+    char c;
     for (unsigned int i = 0; i < headerSize; i++) {
-        char c;
-        /*count = */fread (&c, 1, 1, in);
+        almostsafefread (&c, 1, 1, in);
     }
 
     // *****************
@@ -276,29 +290,29 @@ readASCII1Body (const std::string & filename,
 
         if (numOfVertexProperties==10){
             for (unsigned int j = 0;  j < 6;  j++)
-                fscanf (in, "%f", &v[j]);
+                almostsafefscanf<1> (in, "%f", &v[j]);
             for (unsigned int j = 0;  j < 4;  j++)
-                fscanf (in, "%i", &rgb_buff[j]);
+                almostsafefscanf<1> (in, "%i", &rgb_buff[j]);
         }
         else if (numOfVertexProperties==9){
             for (unsigned int j = 0;  j < 6;  j++)
-                fscanf (in, "%f", &v[j]);
+                almostsafefscanf<1> (in, "%f", &v[j]);
             for (unsigned int j = 0;  j < 3;  j++)
-                fscanf (in, "%i", &rgb_buff[j]);
+                almostsafefscanf<1> (in, "%i", &rgb_buff[j]);
         }else if (numOfVertexProperties==6 && haveColor){
             for (unsigned int j = 0;  j < 3;  j++)
-                fscanf (in, "%f", &v[j]);
+                almostsafefscanf<1> (in, "%f", &v[j]);
             for (unsigned int j = 0;  j < 3;  j++)
-                fscanf (in, "%i", &rgb_buff[j]);
+                almostsafefscanf<1> (in, "%i", &rgb_buff[j]);
         }else if (numOfVertexProperties==7){
             for (unsigned int j = 0;  j < 3;  j++)
-                fscanf (in, "%f", &v[j]);
+                almostsafefscanf<1> (in, "%f", &v[j]);
             for (unsigned int j = 0;  j < 4;  j++)
-                fscanf (in, "%i", &rgb_buff[j]);
+                almostsafefscanf<1> (in, "%i", &rgb_buff[j]);
         }
         else
             for (unsigned int j = 0;  j < numOfVertexProperties;  j++)
-                fscanf (in, "%f", &v[j]);
+                almostsafefscanf<1> (in, "%f", &v[j]);
 
         vertex.emplace_back( v[0],v[1],v[2] );
 
@@ -336,7 +350,7 @@ readASCII1Body (const std::string & filename,
         for (unsigned int i = 0; i < numOfFaces && !feof (in); i++) {
             int f[3];
             int polygonSize;
-            /*count = */fscanf (in, "%d %d %d %d", &polygonSize, &f[0], &f[1], &f[2]);
+            almostsafefscanf<4> (in, "%d %d %d %d", &polygonSize, &f[0], &f[1], &f[2]);
             face.emplace_back(f[0],f[1],f[2]);
         }
     }

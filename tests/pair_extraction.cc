@@ -62,14 +62,12 @@
 #include <iostream>
 #include <string>
 
-#include <sys/time.h>
-#include <unistd.h>
 #include <stdlib.h>
 #include <utility> // pair
 
 #include "testing.h"
 
-using namespace Super4PCS;
+using namespace GlobalRegistration;
 
 struct MyPairCreationFunctor{
   typedef std::pair<unsigned int, unsigned int>ResPair;
@@ -89,11 +87,21 @@ struct MyPairCreationFunctor{
   }
 };
 
+struct TrVisitorType {
+    inline void operator() (
+            float fraction,
+            float best_LCP,
+            Eigen::Ref<Match4PCSBase::MatrixType> /*transformation*/) {
+        std::cout << "New LCP: "
+                  << static_cast<int>(fraction * 100)
+                  << '%'
+                  << best_LCP
+                  <<std::endl;
+    }
+    constexpr bool needsGlobalTransformation() const { return false; }
+};
 
 constexpr Utils::LogLevel loglvl = Utils::Verbose;
-using TrVisitorType = typename std::conditional <loglvl==Utils::NoLog,
-                          Match4PCSBase::DummyTransformVisitor,
-                          Match4PCSBase::TransformVisitor>::type;
 Utils::Logger logger(loglvl);
 
 
@@ -114,7 +122,7 @@ void testFunction( Scalar r, Scalar epsilon,
                    unsigned int minNodeSize){
 
   // Init required structures
-  Super4PCS::Utils::Timer t;
+  GlobalRegistration::Utils::Timer t;
   std::vector< std::pair<unsigned int, unsigned int> > p2;
   p2.reserve(nbPoints*nbPoints);
 
@@ -208,7 +216,7 @@ template<typename Scalar,
          template <typename,typename,int,typename> class _Functor>
 void callSubTests()
 {
-    using namespace Super4PCS::Accelerators::PairExtraction;
+    using namespace GlobalRegistration::Accelerators::PairExtraction;
 
     typedef  Eigen::Matrix<Scalar, Dim, 1> EigenPoint;
     typedef  HyperSphere< EigenPoint, Dim, Scalar > Sphere;
@@ -266,7 +274,7 @@ void callMatchSubTests()
 
 
         // extract point using matcher
-        MatchType match (opt, logger);
+        Testing::TestMatcher<MatchType> match (opt, logger);
         match.init(P, Q);
 
         std::vector<std::pair<int, int>> pairs1, pairs2;
@@ -313,7 +321,7 @@ int main(int argc, const char **argv) {
 
     using std::cout;
     using std::endl;
-    using namespace Super4PCS::Accelerators::PairExtraction;
+    using namespace GlobalRegistration::Accelerators::PairExtraction;
 
 
     cout << "Extract pairs in 2 dimensions (BRUTE FORCE)..." << endl;

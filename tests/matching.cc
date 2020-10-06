@@ -72,7 +72,7 @@
 #define sqr(x) ((x) * (x))
 
 using namespace std;
-using namespace Super4PCS;
+using namespace GlobalRegistration;
 
 using Scalar = Point3D::Scalar;
 enum {Dim = 3};
@@ -80,11 +80,21 @@ typedef Eigen::Transform<Scalar, Dim, Eigen::Affine> Transform;
 
 const int nbSet = 2;
 
+struct TrVisitorType {
+    inline void operator() (
+            float fraction,
+            float best_LCP,
+            Eigen::Ref<Match4PCSBase::MatrixType> /*transformation*/) {
+        std::cout << "New LCP: "
+                  << static_cast<int>(fraction * 100)
+                  << '%'
+                  << best_LCP
+                  <<std::endl;
+    }
+    constexpr bool needsGlobalTransformation() const { return false; }
+};
 
 constexpr Utils::LogLevel loglvl = Utils::Verbose;
-using TrVisitorType = typename std::conditional <loglvl==Utils::NoLog,
-                          Match4PCSBase::DummyTransformVisitor,
-                          Match4PCSBase::TransformVisitor>::type;
 Utils::Logger logger(loglvl);
 
 /*!
@@ -99,18 +109,18 @@ std::array<std::string, nbSet> confFiles = {
 };
 
 std::array<Scalar, nbSet> deltas  = {
-    0.0015,
-    0.0015,
+    0.005,
+    0.005,
 };
 
 std::array<Scalar, nbSet> overlaps = {
-    0.5,
-    0.6,
+    0.8,
+    0.8,
 };
 
 std::array<Scalar, nbSet> n_points = {
-    400,
-    400,
+    200,
+    200,
 };
 
 
@@ -196,7 +206,7 @@ void test_model(const vector<Transform> &transforms,
                 vector<Point3D> &mergedset,
                 int i,
                 int param_i){
-    using namespace Super4PCS;
+    using namespace GlobalRegistration;
 
     const string input1 = files.at(i-1);
     const string input2 = files.at(i);
@@ -246,7 +256,7 @@ void test_model(const vector<Transform> &transforms,
     Match4PCSOptions options;
 
     // Set parameters.
-    Match4PCSBase::MatrixType mat;
+    Match4PCSBase::MatrixType mat (Match4PCSBase::MatrixType::Identity());
     VERIFY(options.configureOverlap(overlaps[param_i]));
     options.sample_size = n_points[param_i];
     options.max_time_seconds = max_time_seconds;

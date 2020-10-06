@@ -60,12 +60,17 @@
 
 //#define MULTISCALE
 
-namespace Super4PCS {
+namespace GlobalRegistration {
 
 
 MatchSuper4PCS::MatchSuper4PCS(const Match4PCSOptions& options,
                                const Utils::Logger &logger)
-    : Base(options, logger),
+    : Base(options
+           , logger
+#ifdef SUPER4PCS_USE_OPENMP
+           , 1
+#endif
+           ),
       pcfunctor_(options_, sampled_Q_3D_) { }
 
 MatchSuper4PCS::~MatchSuper4PCS() { }
@@ -85,9 +90,9 @@ MatchSuper4PCS::FindCongruentQuadrilaterals(
     typedef PairCreationFunctor<Scalar>::Point Point;
 
 #ifdef SUPER4PCS_USE_CHEALPIX
-    typedef Super4PCS::IndexedNormalHealSet IndexedNormalSet3D;
+    typedef GlobalRegistration::IndexedNormalHealSet IndexedNormalSet3D;
 #else
-    typedef  Super4PCS::IndexedNormalSet
+    typedef  GlobalRegistration::IndexedNormalSet
                     < Point,   //! \brief Point type used internally
                       3,       //! \brief Nb dimension
                       7,       //! \brief Nb cells/dim normal
@@ -183,7 +188,7 @@ MatchSuper4PCS::ExtractPairs(Scalar pair_distance,
                              int base_point2,
                              PairsVector* pairs) const {
 
-  using namespace Super4PCS::Accelerators::PairExtraction;
+  using namespace GlobalRegistration::Accelerators::PairExtraction;
 
   pcfunctor_.pairs = pairs;
 
@@ -202,7 +207,7 @@ MatchSuper4PCS::ExtractPairs(Scalar pair_distance,
 
 #ifdef MULTISCALE
   BruteForceFunctor
-  <PairCreationFunctor<Scalar>::Point, 3, Scalar> interFunctor;
+  <PairCreationFunctor<Scalar>::Primitive, PairCreationFunctor<Scalar>::Point, 3, Scalar> interFunctor;
 #else
   IntersectionFunctor
           <PairCreationFunctor<Scalar>::Primitive,

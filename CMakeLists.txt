@@ -1,11 +1,12 @@
-cmake_minimum_required (VERSION 2.6)
-project (Super4PCS)
+cmake_minimum_required (VERSION 3.3)
+project (Super4PCS LANGUAGES CXX VERSION 1.1.3)
 
 ################################################################################
 ## User options
 ################################################################################
 # Set option to enable timing recording
 OPTION (SUPER4PCS_COMPILE_TESTS "Enable testing" TRUE)
+OPTION (SUPER4PCS_COMPILE_DEMOS "Compile demo applications (including the Super4PCS standalone)" TRUE)
 OPTION (IO_USE_OPENCV "Use OpenCV for texture loading" TRUE)
 OPTION (ENABLE_TIMING "Enable computation time recording" FALSE)
 OPTION (SUPER4PCS_USE_CHEALPIX "Use Chealpix for orientation filtering (deprecated)" FALSE)
@@ -16,18 +17,14 @@ OPTION (DL_DATASETS "Download demo datasets and associated run scripts" FALSE)
 ##
 ## Variables configuration
 ################################################################################
-set (Super4PCS_VERSION_MAJOR 1)
-set (Super4PCS_VERSION_MINOR 1)
-
 set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
 set(SRC_DIR ${PROJECT_SOURCE_DIR}/src/)
 set(ASSETS_DIR ${PROJECT_SOURCE_DIR}/assets)
 set(SCRIPTS_DIR ${PROJECT_SOURCE_DIR}/scripts)
 set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
 
-if(NOT INSTALL_DIR)
-  set(INSTALL_DIR ${CMAKE_CURRENT_SOURCE_DIR}/Super4PCS-${Super4PCS_VERSION_MAJOR}.${Super4PCS_VERSION_MINOR})
-endif(NOT INSTALL_DIR)
+# Used by Config.cmake.in
+set(Super4PCS_INSTALL_DIR "${CMAKE_INSTALL_PREFIX}")
 
 ################################################################################
 ## GUARDS
@@ -54,6 +51,8 @@ endif()
 ################################################################################
 include(cmake/ConfigureCompiler.cmake)
 
+include(cmake/ConfigureRPath.cmake)
+
 ################################################################################
 ## Apply user-defined configuration
 ################################################################################
@@ -72,8 +71,8 @@ if (DL_DATASETS)
         URL_MD5 ad1e172902b41a3f17e9b4901adf3ba5
         CONFIGURE_COMMAND ""
         BUILD_COMMAND ""
-        INSTALL_DIR "${INSTALL_DIR}/"
-        CMAKE_ARGS -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>
+        INSTALL_DIR "${CMAKE_INSTALL_PREFIX}/"
+        CMAKE_ARGS -DCMAKE_INSTALL_PREFIX=<CMAKE_INSTALL_PREFIX>
         INSTALL_COMMAND ""
     )
     add_dependencies(dl-datasets dl-dataset-demo1)
@@ -104,10 +103,21 @@ if( NOT EIGEN3_INCLUDE_DIR )
     endif()
 endif( NOT EIGEN3_INCLUDE_DIR )
 include_directories(${EIGEN3_INCLUDE_DIR})
-message(STATUS "-- Eigen3 root path: ${EIGEN3_INCLUDE_DIR}")
+message(STATUS "Eigen3 root path: ${EIGEN3_INCLUDE_DIR}")
 
 ################################################################################
-## Tests, assets and scripts
+## Super4PCS algo
+################################################################################
+
+include_directories(${SRC_DIR})
+
+add_subdirectory(${SRC_DIR}/super4pcs/io)
+add_subdirectory(${SRC_DIR}/super4pcs/utils)
+add_subdirectory(${SRC_DIR}/super4pcs/accelerators)
+add_subdirectory(${SRC_DIR}/super4pcs/algorithms)
+
+################################################################################
+## Demos, tests, assets and scripts
 ################################################################################
 
 if(SUPER4PCS_COMPILE_TESTS)
@@ -117,43 +127,125 @@ endif(SUPER4PCS_COMPILE_TESTS)
 
 include(cmake/AssetsAndScripts.cmake)
 
+if(SUPER4PCS_COMPILE_DEMOS)
+        add_subdirectory(demos)
+endif(SUPER4PCS_COMPILE_DEMOS)
+
 ################################################################################
-## Super4PCS algo
+# API documentation (generated with Doxygen)                                   #
 ################################################################################
 
-include_directories(${SRC_DIR})
-set(Super4PCS_SRC
-    ${SRC_DIR}/super4pcs/algorithms/match4pcsBase.cc
-    ${SRC_DIR}/super4pcs/algorithms/4pcs.cc
-    ${SRC_DIR}/super4pcs/algorithms/super4pcs.cc
-)
-set(Super4PCS_INCLUDE
-    ${SRC_DIR}/super4pcs/sampling.h
-    ${SRC_DIR}/super4pcs/shared4pcs.h
-    ${SRC_DIR}/super4pcs/pairExtraction.h
-    ${SRC_DIR}/super4pcs/algorithms/match4pcsBase.h
-    ${SRC_DIR}/super4pcs/algorithms/4pcs.h
-    ${SRC_DIR}/super4pcs/algorithms/super4pcs.h
-    ${SRC_DIR}/super4pcs/pairCreationFunctor.h
+find_package(Git)
+
+if(GIT_FOUND)
+    execute_process(COMMAND ${GIT_EXECUTABLE} rev-parse HEAD
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        OUTPUT_VARIABLE GIT_CHANGESET)
+    # remove new line sometime appearing in git changeset
+    string(REGEX REPLACE "\n$" "" GIT_CHANGESET "${GIT_CHANGESET}")
+    string(SUBSTRING ${GIT_CHANGESET} 0 7 GIT_CHANGESET_SHORT)
+else()
+    set(GIT_CHANGESET "")
+    set(GIT_CHANGESET_SHORT "")
+endif()
+
+find_package(Doxygen 1.8.0)
+if(DOXYGEN_FOUND)
+
+    set (SUPER4PCS_PROJECT_NUMBER "V${Super4PCS_VERSION} (${GIT_CHANGESET_SHORT})")
+    set (SUPER4PCS_DOC_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/doc)
+    file (GLOB_RECURSE SUPER4PCS_MD_FILES ${CMAKE_CURRENT_SOURCE_DIR}/doc/*.md)
+
+    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/doc/Doxyfile.in ${SUPER4PCS_DOC_DIRECTORY}/Doxyfile @ONLY)
+
+    add_custom_target(doc
+        ${CMAKE_COMMAND} -E make_directory ${SUPER4PCS_DOC_DIRECTORY}
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+        ${CMAKE_CURRENT_SOURCE_DIR}/doc/img/
+        ${SUPER4PCS_DOC_DIRECTORY}/html/img
+        COMMAND ${CMAKE_COMMAND} -E copy
+        ${CMAKE_CURRENT_SOURCE_DIR}/CHANGELOG
+        ${SUPER4PCS_DOC_DIRECTORY}/
+        COMMAND ${DOXYGEN_EXECUTABLE} ${SUPER4PCS_DOC_DIRECTORY}/Doxyfile
+        DEPENDS
+        ${CMAKE_CURRENT_SOURCE_DIR}/doc/Doxyfile.in
+        ${CMAKE_CURRENT_SOURCE_DIR}/CHANGELOG
+        ${SUPER4PCS_MD_FILES}
+        SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/doc/Doxyfile.in
+        ${CMAKE_CURRENT_SOURCE_DIR}/CHANGELOG
+        ${SUPER4PCS_MD_FILES}
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        COMMENT "Generating API documentation with Doxygen" VERBATIM
+        )
+
+    install( DIRECTORY ${SUPER4PCS_DOC_DIRECTORY}/ DESTINATION ${CMAKE_INSTALL_PREFIX}/doc )
+endif(DOXYGEN_FOUND)
+
+################################################################################
+# Installation (source: https://github.com/forexample/package-example)
+################################################################################
+
+# add a target allowing to force the installation of the library
+
+set(ForceInstallCommutators "")
+if (MSVC)
+        set(ForceInstallCommutators "/p:Configuration=${CMAKE_BUILD_TYPE}")
+endif(MSVC)
+add_custom_target(ForceSuper4PCSInstallation
+    COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target install -- ${ForceInstallCommutators}
+    COMMENT "Forcing Super4PCS installation")
+
+
+set(config_install_dir "${CMAKE_INSTALL_PREFIX}/lib/cmake/")
+set(include_install_dir "${CMAKE_INSTALL_PREFIX}/include")
+set(generated_dir "${CMAKE_CURRENT_BINARY_DIR}/generated")
+
+# Configuration
+set(version_config "${generated_dir}/${PROJECT_NAME}ConfigVersion.cmake")
+set(project_config "${generated_dir}/${PROJECT_NAME}Config.cmake")
+set(targets_export_name "${PROJECT_NAME}Targets")
+set(namespace "${PROJECT_NAME}::")
+
+# Include module with fuction 'write_basic_package_version_file'
+include(CMakePackageConfigHelpers)
+
+# Configure '<PROJECT-NAME>ConfigVersion.cmake'
+# Note: PROJECT_VERSION is used as a VERSION
+write_basic_package_version_file(
+    "${version_config}"
+                VERSION ${Super4PCS_VERSION}
+                COMPATIBILITY AnyNewerVersion
 )
 
-add_subdirectory(${SRC_DIR}/super4pcs/io)
-add_subdirectory(${SRC_DIR}/super4pcs/utils)
-add_subdirectory(${SRC_DIR}/super4pcs/accelerators)
+# Configure '<PROJECT-NAME>Config.cmake'
+# Use variables:
+#   * targets_export_name
+#   * PROJECT_NAME
+configure_package_config_file(
+    "cmake/Config.cmake.in"
+    "${project_config}"
+    INSTALL_DESTINATION "${config_install_dir}"
+)
 
-add_library(super4pcs_algo ${Super4PCS_SRC} ${Super4PCS_INCLUDE})
+install(EXPORT Super4PCS-IOLibTargets    DESTINATION ${config_install_dir})
+install(EXPORT Super4PCS-AlgoLibTargets  DESTINATION ${config_install_dir})
+install(EXPORT Super4PCS-AccelLibTargets DESTINATION ${config_install_dir})
+
 if(SUPER4PCS_USE_CHEALPIX)
-    target_link_libraries(super4pcs_algo ${Chealpix_LIBS} )
+    install(EXPORT chealpixTargets DESTINATION ${config_install_dir})
 endif(SUPER4PCS_USE_CHEALPIX)
 
-# add the executable
-add_executable(${PROJECT_NAME} ${SRC_DIR}/super4pcs/super4pcs_test.cc)
+# Headers:
+#   * Source/foo/Bar.hpp -> <prefix>/include/foo/Bar.hpp
+install(DIRECTORY ${SRC_DIR}/
+        DESTINATION ${include_install_dir}
+        FILES_MATCHING REGEX ".*(h|hpp)$")
 
-target_link_libraries(super4pcs_algo super4pcs_io super4pcs_accel)
-target_link_libraries(${PROJECT_NAME} super4pcs_algo super4pcs_utils)
-
-install( TARGETS super4pcs_algo ${PROJECT_NAME}
-    RUNTIME DESTINATION ${INSTALL_DIR}/bin
-    LIBRARY DESTINATION ${INSTALL_DIR}/lib
-    ARCHIVE DESTINATION ${INSTALL_DIR}/lib )
-
+# Config
+#   * <prefix>/lib/cmake/Foo/FooConfig.cmake
+#   * <prefix>/lib/cmake/Foo/FooConfigVersion.cmake
+install(
+    FILES "${project_config}" "${version_config}"
+    DESTINATION "${config_install_dir}"
+)

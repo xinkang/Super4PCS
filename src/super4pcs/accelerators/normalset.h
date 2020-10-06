@@ -45,13 +45,13 @@
 // http://geometry.cs.ucl.ac.uk/projects/2014/super4PCS/.
 
 
-#ifndef _INDEXED_NORMAL_SET_H_
-#define _INDEXED_NORMAL_SET_H_
+#ifndef _SUPER4PCS_ACCELERATORS_INDEXED_NORMAL_SET_H_
+#define _SUPER4PCS_ACCELERATORS_INDEXED_NORMAL_SET_H_
 
 #include "super4pcs/utils/disablewarnings.h"
 #include "super4pcs/accelerators/utils.h"
 
-namespace Super4PCS{
+namespace GlobalRegistration{
 
 /*!
   Normal set indexed by a position in euclidean space.
@@ -83,37 +83,39 @@ struct IndexedNormalSet{
 #endif
 
 private:
-  static constexpr Scalar _nepsilon = Scalar(1.)/Scalar(_ngSize) + 0.00001;
+  const Scalar _nepsilon;
   std::vector<AngularGrid*> _grid;
   Scalar _epsilon;
   int _egSize;    //! <\brief Size of the euclidean grid for each dimension
 
-  // Get the index corresponding to position p \warning Bounds are not tested
+  /// Get the index corresponding to position p \warning Bounds are not tested
   inline int indexPos   ( const Point& p) const;
-  // Get the index corresponding to normal n   \warning Bounds are not tested
+  /// Get the index corresponding to normal n   \warning Bounds are not tested
   inline int indexNormal( const Point& n) const;
 
-  // Get the coordinates corresponding to position p \warning Bounds are not tested
+  /// Get the coordinates corresponding to position p \warning Bounds are not tested
   inline Point coordinatesPos   ( const Point& p) const
   { return p/_epsilon;  }
-  // Get the index corresponding to normal n   \warning Bounds are not tested
+  /// Get the index corresponding to normal n   \warning Bounds are not tested
   inline Point coordinatesNormal( const Point& n) const
   {
     static const Point half = Point::Ones()/Scalar(2.);
     return (n/Scalar(2.) + half)/_nepsilon;
   }
 
-  // Get the coordinates corresponding to position p \warning Bounds are not tested
+  /// Get the coordinates corresponding to position p \warning Bounds are not tested
   inline int indexCoordinatesPos   ( const Point& pCoord) const;
-  // Get the index corresponding to normal n   \warning Bounds are not tested
+  /// Get the index corresponding to normal n   \warning Bounds are not tested
   inline int indexCoordinatesNormal( const Point& nCoord) const;
 
   //inline Point indexToPos (int id) const;
 
 public:
   inline IndexedNormalSet(const Scalar epsilon)
-  : _epsilon(epsilon) {
-    // We need to check if epsilon is a power of two and correct it if needed
+    : _nepsilon(Scalar(1.)/Scalar(_ngSize) + 0.00001),
+      _epsilon(epsilon)
+  {
+    /// We need to check if epsilon is a power of two and correct it if needed
     const int gridDepth = -std::log2(epsilon);
     _egSize = std::pow(2,gridDepth);
     _epsilon = 1.f/_egSize;
